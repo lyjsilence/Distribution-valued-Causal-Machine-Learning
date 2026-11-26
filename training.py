@@ -35,7 +35,7 @@ def train_regression(args, model, dl_train, dl_test, dl_est_test_list, device, v
             loss_train.backward()
             optimizer.step()
 
-            if verbose:
+            if verbose and getattr(args, "log_batches", True):
                 print('\rEpoch [{}/{}], Batch [{}/{}], Loss = {:.4f}, time elapsed = {:.2f}, '
                       .format(epoch, args.epochs_DR, i + 1, len(dl_train), np.sum(loss_train_list) / len(loss_train_list),
                               time.time() - tic), end='')
@@ -53,8 +53,13 @@ def train_regression(args, model, dl_train, dl_test, dl_est_test_list, device, v
             y_test = y_test.detach().cpu().numpy()
             if verbose:
                 print('Test: MAE={:.4f}'.format(loss_test.cpu().detach().numpy()))
+                if not getattr(args, "log_batches", True):
+                    print(f'Epoch {epoch} training MAE={np.mean(loss_train_list):.6f} '
+                          f'validation MAE={loss_test.item():.6f}')
 
             if loss_test.item() < best_loss:
+                if getattr(args, "select_best", False):
+                    best_loss = loss_test.item()
                 model_save_path = os.path.join(args.results_save_path, 'Simulation', 'Size='+str(args.sample_size), 'DR_sim.pkl')
                 # model_save_path = os.path.join(args.results_save_path, 'DR_sim.pkl')
                 torch.save(model.state_dict(), model_save_path)
@@ -106,7 +111,7 @@ def train_IPW(args, model, dl_train, dl_test, dl_est_test_list, device, verbose=
 
             loss_train_list.append(loss_nll.item())
 
-            if verbose:
+            if verbose and getattr(args, "log_batches", True):
                 print('\rEpoch [{}/{}], Batch [{}/{}], Loss = {:.4f}, time elapsed = {:.2f}, '
                       .format(epoch, args.epochs_IPW, i + 1, len(dl_train), np.mean(loss_train_list), time.time() - tic), end='')
 
@@ -134,8 +139,13 @@ def train_IPW(args, model, dl_train, dl_test, dl_est_test_list, device, verbose=
 
             if verbose:
                 print('Test: NLL={:.4f}'.format(np.mean(loss_test_list)))
+                if not getattr(args, "log_batches", True):
+                    print(f'Epoch {epoch} training NLL={np.mean(loss_train_list):.6f} '
+                          f'validation NLL={np.mean(loss_test_list):.6f}')
 
             if np.mean(loss_test_list) < best_loss:
+                if getattr(args, "select_best", False):
+                    best_loss = np.mean(loss_test_list)
                 model_save_path = os.path.join(args.results_save_path, 'Simulation', 'Size='+str(args.sample_size), 'IPW_sim.pkl')
                 # model_save_path = os.path.join(args.results_save_path, 'IPW_sim.pkl')
                 torch.save(model.state_dict(), model_save_path)

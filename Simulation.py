@@ -435,6 +435,8 @@ if __name__ == '__main__':
         # df_res = pd.DataFrame(columns=['MCP', 'lasso', 'ridge', 'elastic net', 'NFR', 'rep_NFR'])
         df_res = pd.DataFrame(columns=['q_10', 'q_20', 'q_30', 'q_40', 'q_50', 'q_60', 'q_70', 'q_80', 'q_90'])
 
+        save_path = os.path.join(args.results_save_path, 'Simulation', 'Size='+str(args.sample_size))
+        os.makedirs(save_path, exist_ok=True)
         estimator = Estimator(Y_inv=y_inv_lambda, D=D, X=X, Y=Y, quantiles=quantiles, K_fold=args.K_fold, reg_met=args.reg_met)
 
         DR_res, IPW_res, DML_res = estimator.estimate()
