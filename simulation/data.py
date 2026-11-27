@@ -5,7 +5,6 @@ import numpy as np
 from scipy.stats import beta
 
 DOSES = (-0.5, 0.0, 0.5)
-FIGURE_DOSE = 0.0
 SEED = 1
 POOL_SIZE = 100_000
 
@@ -40,7 +39,7 @@ def truth(x, a, quantiles):
     """Analytic reference evaluated over the finite synthetic covariate pool."""
     curve = sum(weight * beta.ppf(quantiles, k / 10, k / 10)
                 for weight, k in zip(outcome_weights(x).mean(axis=0), range(1, 6)))
-    return (a.mean() + np.exp(FIGURE_DOSE)) * curve
+    return (a.mean() + np.exp(np.asarray(DOSES)[:, None])) * curve
 
 
 def save_pool(path, x, a, y):

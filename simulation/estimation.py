@@ -10,7 +10,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 
-from .data import DOSES, FIGURE_DOSE
+from .data import DOSES
 from .models import Flow_IPW, NFR
 
 # Kernel and bandwidth
@@ -146,7 +146,7 @@ def fit(x, a, q, grid, config, out):
     if device.type == "cpu":
         torch.set_num_threads(min(torch.get_num_threads(), 4))
     xa = np.column_stack((x, a))
-    scores = np.empty((3, len(a), len(grid)))
+    scores = np.empty((len(DOSES), 3, len(a), len(grid)))
     diagnostics = []
     p_x = x.shape[1]
     network = SimpleNamespace(num_cov=p_x, input_dim=1, cond_dim=p_x, hidden_dim=config.cnf_width,
@@ -171,23 +171,22 @@ def fit(x, a, q, grid, config, out):
                 DataLoader(xa[test], batch_size=len(test)),
                 [DataLoader(z, batch_size=len(test)) for z in counterfactuals],
                 device, config, folder / "cnf.pt")
-        target = DOSES.index(FIGURE_DOSE)
-        pred, raw = mean[target], raw_density[target]
-        density = np.maximum(raw, config.density_floor)
-        h = config.bandwidth_multiplier * select(a[test], FIGURE_DOSE, density, q[test])
-        w = kernel(h, FIGURE_DOSE, a[test, None]) / density
-        mass = w.sum()
-        scores[0, test] = pred
-        scores[1, test] = w * q[test]
-        scores[2, test] = pred + w * (q[test] - pred)
-        diagnostics.append([fold, FIGURE_DOSE, h, len(test), np.count_nonzero(w),
-                            np.quantile(raw, 0.05), np.median(raw),
-                            np.mean(raw < config.density_floor),
-                            mass**2 / np.square(w).sum() if mass else 0,
-                            w.max() / mass if mass else np.nan])
+        for j, (dose, pred, raw) in enumerate(zip(DOSES, mean, raw_density)):
+            density = np.maximum(raw, config.density_floor)
+            h = config.bandwidth_multiplier * select(a[test], dose, density, q[test])
+            w = kernel(h, dose, a[test, None]) / density
+            mass = w.sum()
+            scores[j, 0, test] = pred
+            scores[j, 1, test] = w * q[test]
+            scores[j, 2, test] = pred + w * (q[test] - pred)
+            diagnostics.append([fold, dose, h, len(test), np.count_nonzero(w),
+                                np.quantile(raw, 0.05), np.median(raw),
+                                np.mean(raw < config.density_floor),
+                                mass**2 / np.square(w).sum() if mass else 0,
+                                w.max() / mass if mass else np.nan])
         print(f"Completed fold {fold}/{config.folds}", flush=True)
     columns = ["fold", "dose", "bandwidth", "n", "nonzero_weights",
                "raw_density_p05", "raw_density_median", "fraction_density_floored", "weight_ess",
                "max_weight_share"]
     pd.DataFrame(diagnostics, columns=columns).to_csv(out / "diagnostics.csv", index=False)
-    return scores.mean(axis=1)
+    return scores.mean(axis=2)

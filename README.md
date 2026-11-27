@@ -1,63 +1,66 @@
 # Distribution-valued Causal Machine Learning
 
-Simulation code for Figure 3 of *Causal Policy Evaluation with Distribution-valued Outcomes under Continuous Interventions*.
+Simulation code for *Causal Policy Evaluation with Distribution-valued Outcomes under Continuous Interventions*.
 
 ## Requirements
 
-Python 3.8 to 3.11. Install the dependencies and run the commands from the repository root.
+Use Python 3.8 to 3.11 and run the commands from the repository root.
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-Training uses CUDA when available. Use `--device cpu` for CPU training.
+Training uses CUDA when available. Use `--device cpu` to train on the CPU.
 
 ## Repository structure
 
 | File | Purpose |
 | --- | --- |
-| `replicate.py` | Run the simulation and plot Figure 3 |
-| `simulation/data.py` | Generate synthetic data and the true quantile curve |
-| `simulation/estimation.py` | Train the nuisance models and compute cross-fitted estimates and diagnostics |
+| `replicate.py` | Generate data, run replications, and aggregate results |
+| `simulation/data.py` | Synthetic data and true quantile curves |
+| `simulation/estimation.py` | Nuisance training, cross-fitted estimation, and diagnostics |
 | `simulation/models.py`, `simulation/batchnorm.py` | NFR and CNF architectures |
-| `reference/figure3_runs.npz` | 100 runs at dose zero, with shape `(100, 4, 9)` for runs, curves, and quantiles. Curve order is truth, Dist-DR, Dist-IPW, Dist-DML. |
+| `reference/simulation_runs.npz` | Archived simulation estimates |
 
-## 1. Reproduce Figure 3
+## 1. Generate data
 
 ```bash
-python replicate.py
+python replicate.py --mode generate
 ```
 
-The command plots the archived runs and saves `figure3.png` and `figure3.pdf` under `outputs/archive/`.
+The default pool contains 100,000 synthetic units. Each has 10 covariates `X`, a continuous dose `A`, and 100 repeated outcomes `Y`. The estimator sorts each unit's outcomes and evaluates its empirical quantile curve at levels 0.1 to 0.9. The pool is saved to `outputs/simulation_pool.npz`.
 
-![Figure 3. True and estimated quantile curves at dose zero for Dist-DR, Dist-IPW, and Dist-DML.](figures/figure3.png)
-
-Curves show the mean across runs at dose zero. Shading shows the 2.5th and 97.5th percentiles across runs.
-
-## 2. Generate data and retrain
+## 2. Run the simulations
 
 ```bash
 python replicate.py --mode train
 ```
 
-This command generates a pool of 100,000 synthetic units and trains 100 replications on a fixed sample of 50,000 units. The pool contains `X` (10 covariates), `A` (continuous dose), and `Y` (100 repeated measurements per unit). The estimator sorts each unit's measurements and evaluates its empirical quantile curve at levels 0.1 to 0.9.
-
-The command reuses an existing simulation pool. Use `--pool PATH` to select an input file or `--mode generate` to generate a pool separately. Set `--data-seed` and `--seed` for data generation and training. Both default to 1.
+The command generates or reuses the pool, draws a fixed sample of 50,000 units, and fits 100 replications. Each replication estimates the curves at doses -0.5, 0, and 0.5 using two folds. Both `--data-seed` and `--seed` default to 1.
 
 | Setting | Default |
 | --- | --- |
-| Cross-fitting | Two folds |
-| Outcome regression | NFR with two ReLU hidden layers of width 64 and a cubic spline output, 200 epochs |
-| Generalized propensity density | CNF with one ODE block of width 32, a conditional Gaussian base, and the Dormand-Prince solver, up to 50 epochs. The estimated density is floored at 0.01. |
-| Kernel and bandwidth | Epanechnikov kernel. The selector minimizes the estimated squared bias plus variance, initialized at the fold's dose standard deviation times the fold size to the power `-1/5`. |
-| Optimization | Adam with learning rate 0.003 and batch size 128 |
+| Outcome regression | NFR with two 64-unit ReLU layers and cubic spline output, 200 epochs |
+| Propensity density | CNF with one ODE block of width 32, a conditional Gaussian base, and the Dormand-Prince solver, up to 50 epochs |
+| Kernel and bandwidth | Epanechnikov kernel, with bandwidth selected separately by fold and dose using the estimated squared bias and variance |
+| Optimization | Adam with learning rate 0.003 and batch size 128. The estimated density is floored at 0.01. |
 
-## 3. Worked example and diagnostics
+The following command runs a short example on the CPU.
 
 ```bash
 python replicate.py --mode train --device cpu --sample-size 1000 --reps 1 --epochs-dr 1 --epochs-cnf 1 --output outputs/example
 ```
 
-This runs both folds and draws Figure 3 in `outputs/example/trained/`. The training directory contains the run-level curves, fold checkpoints and loss logs. Each `run_*/diagnostics.csv` reports bandwidth, local sample count, propensity density, density flooring, effective sample size, and the largest normalized weight. The simulation logs the loss on each scoring fold and uses it in the learning-rate scheduler.
+Each `run_*/diagnostics.csv` reports bandwidth, propensity density, density flooring, effective sample size, and weight concentration by fold and dose. Fold logs report training and scoring losses. To check sensitivity, rerun with `--bandwidth-multiplier 0.5` or `--observations 50`, reuse the same pool with `--pool`, and choose a separate output folder.
 
-To check sensitivity, repeat the example with `--bandwidth-multiplier 0.5` or `--observations 50`. Reuse `--pool outputs/example/simulation_pool_1000.npz` and choose a separate `--output` folder. Use `python replicate.py --help` for options.
+## 3. Aggregate results
+
+```bash
+python replicate.py
+```
+
+This command aggregates the 100 archived replications and returns **Table 1** as `table1.csv` and **Figure 3** as `figure3.png` and `figure3.pdf` in `outputs/archive/`. Table 1 uses the per-quantile absolute error of the across-run mean. The default output and the image below use the original manuscript figure.
+
+`--mode train` aggregates the new results in `outputs/trained/`. To aggregate a saved run file separately, use `python replicate.py --mode aggregate --runs PATH`. This also allows Figure 3 to be redrawn directly from `reference/simulation_runs.npz` using the manuscript plotting settings.
+
+![Figure 3. Ground and estimated quantile functions at dose zero for Dist-DR, Dist-IPW, and Dist-DML.](figures/figure3.png)
