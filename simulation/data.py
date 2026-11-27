@@ -1,4 +1,4 @@
-"""Synthetic data for the continuous-dose simulation and the worked example."""
+"""Synthetic data for the continuous-dose simulation."""
 from pathlib import Path
 
 import numpy as np

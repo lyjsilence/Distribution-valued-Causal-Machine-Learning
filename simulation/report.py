@@ -1,6 +1,4 @@
 """Aggregate simulation replications into the paper table and diagnostic figures."""
-from pathlib import Path
-
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -72,6 +70,8 @@ def sensitivity(groups, name, xlabel, out):
         ax.set(xscale="log", title=f"Dose {dose:g}", xlabel=xlabel)
     axes[0].set_ylabel("Mean run-level MAE")
     fig.savefig(out / (name + ".pdf"))
+    if name == "figure4":
+        fig.savefig(out / "figure4.png", dpi=135)
     plt.close(fig)
 
 

@@ -1,13 +1,11 @@
 import numpy as np
 import torch
-import copy
 import torch.nn as nn
 from scipy.interpolate import BSpline
 from torchdiffeq import odeint_adjoint as odeint
 from torch.distributions.normal import Normal
-from MovingBatchNorm1d import MovingBatchNorm1d
-from baseline_models import est_ECDF
-import utils
+from .batchnorm import MovingBatchNorm1d
+from .regularization import penalty_terms
 
 ACTIVATIONS = {
     "relu": nn.ReLU(),
@@ -34,8 +32,6 @@ class LayerNorm(nn.Module):
         std = x.std(dim=-1, keepdim=True)
         return (x-mean) / std * self.alpha + self.beta
 
-
-# Numerical MLP
 class MLP(nn.Module):
     def __init__(self, dim_in, dim_out, dim_hidden=[64, 64, 64], activation='relu', dropout=0.1, device='cpu'):
         super(MLP, self).__init__()
@@ -54,24 +50,6 @@ class MLP(nn.Module):
         x = self.linears[-1](x)
         return x
 
-class simple_MLP(nn.Module):
-    def __init__(self, dim_in, dim_out, dim_hidden=[64, 64, 64], activation='relu', dropout=0.1, device='cpu'):
-        super(simple_MLP, self).__init__()
-        self.activation = ACTIVATIONS[activation]
-        self.dim = [dim_in] + dim_hidden + [dim_out]
-        self.linears = nn.ModuleList([nn.Linear(self.dim[i-1], self.dim[i]) for i in range(1, len(self.dim))])
-        self.layernorms = nn.ModuleList([LayerNorm(hidden) for hidden in dim_hidden])
-        self.dropouts = nn.ModuleList([nn.Dropout(dropout) for _ in range(len(dim_hidden))])
-
-    def forward(self, x):
-        for i in range(len(self.dim)-2):
-            x = self.linears[i](x)
-            x = self.activation(x)
-            x = self.dropouts[i](x)
-        x = self.linears[-1](x)
-        return x
-
-# Functional_MLP
 class Functional_MLP(nn.Module):
     def __init__(self, dim_out, t=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], device='cpu'):
         super(Functional_MLP, self).__init__()
@@ -101,8 +79,6 @@ class Functional_MLP(nn.Module):
             y += x[:, j].unsqueeze(1).repeat([1, betas.shape[1]]) * betas
         return y
 
-
-# Neural Functional Regression for arbitrary quantile
 class NFR(nn.Module):
     def __init__(self, dim_in, dim_out, t=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], dim_hidden=[64, 64, 64],
                  activation='relu', dropout=0.1, device='cpu'):
@@ -130,47 +106,6 @@ class NFR(nn.Module):
         X = self.Functional_MLP(X)
         return X
 
-
-# Neural Functional Regression with representation learning for arbitrary quantile
-class rep_NFR(nn.Module):
-    def __init__(self, dim_in, dim_out, t=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], dim_hidden_rep=[64, 64, 64],
-                 dim_hidden_head=[32, 32], num_treatment=5, activation='relu', dropout=0.1, device='cpu'):
-        super(rep_NFR, self).__init__()
-        '''
-        dim_in: dimension of features
-        dim_out: dimension of output from numerical MLP
-        num_basis: number of basis used
-        '''
-        self.dim_in = dim_in
-        self.dim_out = dim_out
-        self.num_treatment = num_treatment
-        self.t = t
-        self.device = device
-        self.activation = ACTIVATIONS[activation]
-        self.dropout = dropout
-
-        # Numerical MLP for scalar input and representation learning
-        self.MLP = MLP(dim_in, dim_out, dim_hidden_rep, activation=activation, dropout=self.dropout)
-
-        # headers
-        headers = []
-        for i in range(self.num_treatment):
-            headers.append(nn.Sequential(
-                               MLP(dim_out, dim_in, dim_hidden_head, activation=activation, dropout=self.dropout),
-                               Functional_MLP(dim_in, t, device=device)
-                           ))
-        self.headers = nn.ModuleList(headers)
-
-    def forward(self, X):
-        X, D = X[:, :-1], X[:, -1]
-        X = self.MLP(X)
-        y = torch.zeros([X.shape[0], len(self.t)]).to(self.device)
-        for i in range(self.num_treatment):
-            y += self.headers[i](X) * ((D == i) * 1.0).unsqueeze(1)
-        return y
-
-
-# Normalizing Flow
 class Gated_Linear(nn.Module):
     def __init__(self, dim_in, dim_out):
         super(Gated_Linear, self).__init__()
@@ -181,7 +116,6 @@ class Gated_Linear(nn.Module):
     def forward(self, t, x):
         gate = torch.sigmoid(self.gate(t))
         return self.linear(x) * gate + self.bias(t)
-
 
 class ODENet(nn.Module):
     def __init__(self, input_dim, cond_dim, hidden_dim, hidden_layer=2):
@@ -206,7 +140,6 @@ class ODENet(nn.Module):
             if l < len(self.linear_layers) - 1:
                 dx = self.act_layers[l](dx)
         return dx
-
 
 class ODEFunc(nn.Module):
     def __init__(self, ODENet, rademacher=False, div_samples=1):
@@ -272,16 +205,12 @@ class ODEFunc(nn.Module):
             dz = self.ODENet(t, z, cond, *states[3:])
 
             # Compute tr(df/dz)
-            if not self.training and dz.view(dz.shape[0], -1).shape[1] == 2:
-                divergence = self.divergence_bf(dz, z).view(z.shape[0], 1)
-            else:
-                divergence, sqjacnorm = self.divergence_fn(dz, z, e=self._e)
-                divergence = divergence.view(z.shape[0], 1)
+            divergence, sqjacnorm = self.divergence_fn(dz, z, e=self._e)
+            divergence = divergence.view(z.shape[0], 1)
             self.sqjacnorm = sqjacnorm
 
         return tuple([dz, -divergence, torch.zeros_like(cond).requires_grad_(True)] +
                      [torch.zeros_like(s_).requires_grad_(True) for s_ in states[3:]])
-
 
 class RegularizedODEfunc(nn.Module):
     def __init__(self, ODEFunc, reg_fns):
@@ -306,7 +235,6 @@ class RegularizedODEfunc(nn.Module):
                 return dstate + reg_states
             else:
                 return dstate
-
 
 class CNF(nn.Module):
     def __init__(self, ODEFunc, T=1.0, reg_fns=None, train_T=False, solver='dopri5', atol=1e-6, rtol=1e-4):
@@ -377,12 +305,11 @@ class CNF(nn.Module):
         else:
             return z_t
 
-
 class Cond_CNF(nn.Module):
     def __init__(self, args, device):
         super(Cond_CNF, self).__init__()
 
-        reg_fns, reg_coeffs = utils.creat_reg_fns(args)
+        reg_fns, reg_coeffs = penalty_terms(args)
 
         chain = [self.build_cnf(args, reg_fns) for _ in range(args.num_blocks)]
 
@@ -427,7 +354,6 @@ class Flow_IPW(nn.Module):
         self.flow = Cond_CNF(args, device)
         self.input_size = args.num_cov
         self.hidden_size = args.hidden_dim
-        self.num_obs = args.num_obs
         self.softplus = nn.Softplus()
         self.device = device
 
