@@ -1,28 +1,18 @@
 # Distribution-valued Causal Machine Learning
 
-Simulation code for *Causal Policy Evaluation with Distribution-valued Outcomes under Continuous Interventions*.
+Code and simulated results for Figure 3 of *Causal Policy Evaluation with Distribution-valued Outcomes under Continuous Interventions*.
 
-## Reproduce the simulations
+## Reproduce Figure 3
 
 ```bash
 python -m pip install -r requirements.txt
 python replicate.py
 ```
 
-Use Python 3.8 to 3.11. The default command rebuilds Table 1 and Figures 3–5 from `reference/` and writes them to `outputs/archive/`.
+Use Python 3.8 to 3.11. The default command renders the PNG and PDF in `outputs/archive/` from the 100 archived runs at dose zero. The archive stores the true curve and the Dist-DR, Dist-IPW, and Dist-DML estimates on the nine-point quantile grid.
 
-| Task | Command |
-| --- | --- |
-| Train a small example on CPU | `python replicate.py --mode train --preset smoke --device cpu` |
-| Generate simulation data | `python replicate.py --mode generate` |
-| Retrain the paper simulations | `python replicate.py --mode train` |
+Run `python replicate.py --mode train` to generate the synthetic data and retrain all 100 replications with 50,000 units per replication. The default uses two folds, an Epanechnikov kernel, and seed 1. For a short training check, add `--reps 1 --epochs-dr 1 --epochs-cnf 1`.
 
-Each unit has covariates `X`, assigned dose `A`, and repeated outcomes `Y`. The estimator sorts the outcomes to form a nine-point quantile curve. Defaults use two folds, the Epanechnikov kernel and paper bandwidth rule, NFR widths `[64, 64]`, CNF width `32`, and seed `1`.
+![Figure 3. True and estimated quantile curves at dose zero for Dist-DR, Dist-IPW, and Dist-DML.](figures/figure3.png)
 
-Training saves fold checkpoints, convergence logs, and overlap, weight, and bandwidth diagnostics. Use `--observations 50` to check sensitivity to fewer measurements per unit and `--help` for other settings.
-
-## Figure 4
-
-![Figure 4. Dist-DML estimation error by simulation sample size at three treatment levels.](figures/figure4.png)
-
-The lines show mean run-level MAE across 100 simulation runs. The shaded areas show one standard deviation.
+Shading shows the 2.5th and 97.5th percentiles across simulation runs.
