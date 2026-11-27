@@ -5,7 +5,6 @@ from scipy.interpolate import BSpline
 from torchdiffeq import odeint_adjoint as odeint
 from torch.distributions.normal import Normal
 from .batchnorm import MovingBatchNorm1d
-from .regularization import penalty_terms
 
 ACTIVATIONS = {
     "relu": nn.ReLU(),
@@ -17,6 +16,18 @@ ACTIVATIONS = {
     "selu": nn.SELU(),
     "softmax": nn.Softmax(dim=1)
 }
+
+
+def kinetic_energy(x, t, logp, dx, dlogp, context):
+    return 0.5 * dx.reshape(dx.shape[0], -1).square().mean(dim=-1)
+
+
+def jacobian_norm(x, t, logp, dx, dlogp, context):
+    return context.sqjacnorm
+
+
+def penalty_terms(config):
+    return (kinetic_energy, jacobian_norm), (config.kinetic_energy, config.jacobian_norm2)
 
 
 class LayerNorm(nn.Module):
